@@ -1,7 +1,7 @@
 
 import React, { useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = "/api/sheets";
 
 export default function App() {
   const [pin, setPin] = useState("");
