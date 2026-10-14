@@ -1,0 +1,61 @@
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Noto Sans Tamil", sans-serif;
+  background: #f2f6f3;
+  color: #18372b;
+}
+
+.app {
+  width: min(100% - 32px, 600px);
+  margin: 60px auto;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+header h1 {
+  color: #176b4d;
+}
+
+.panel {
+  background: white;
+  padding: 28px;
+  border-radius: 16px;
+  box-shadow: 0 8px 28px #18372b12;
+}
+
+label,
+input,
+button {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+}
+
+input {
+  padding: 13px;
+  border: 1px solid #ccd8d0;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+button {
+  padding: 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #176b4d;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #10553c;
+}
