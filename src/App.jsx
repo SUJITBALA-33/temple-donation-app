@@ -1,240 +1,223 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import './styles.css'
 
-import React, { useState } from "react";
+const rs = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+const first = s => { try { return [...new Intl.Segmenter('ta', { granularity: 'grapheme' }).segment(s)][0].segment } catch { return (s || '?')[0] } }
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.now() + Math.random().toString(36).slice(2, 10))
 
-const API_URL = "/api/sheets";
+const localMsg = d => `அருள்மிகு ஸ்ரீ காமாட்சி அம்மன் திருக்கோவில் மலையப்பாளையம். மாங்கல்ய காணிக்கை விபரம். திரு.${d.name}, கோவில் திருப்பணிக்கு ஆதரவளித்தமைக்கு நன்றி. மொத்த தொகை ₹${d.total}. தற்பொழுது வழங்கிய தொகை: ₹${d.now}. மொத்தம் வழங்கிய தொகை : ₹${d.paid}. மீதம் வழங்க வேண்டிய தொகை : ₹${d.bal}. திருக்கோவில் திருப்பணிகள் சிறப்பாக நடைபெற்று வருகின்றன. அனைவருக்கும் அம்மனின் திருவருள் கிடைக்க வேண்டுகிறோம். இப்படிக்கு :- அருள்மிகு ஸ்ரீ காமாட்சி அம்மன் திருக்கோவில் திருப்பணிக்குழு மலையப்பாளையம்.`
+
+async function api(pin, action, extra = {}) {
+  const res = await fetch('/api/sheets', {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ pin, action, ...extra })
+  })
+  let data = null
+  try { data = await res.json() } catch { /* not JSON */ }
+  if (!res.ok || !data || data.error) {
+    const e = new Error((data && data.error) || 'Backend பதில் பிழை: ' + res.status)
+    e.badPin = res.status === 401 || (data && (data.code === 'BAD_PIN' || data.error === 'PIN தவறு'))
+    throw e
+  }
+  return data
+}
 
 export default function App() {
-  const [pin, setPin] = useState("");
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [donors, setDonors] = useState([]);
-  const [work, setWork] = useState("");
-  const [amounts, setAmounts] = useState({});
-  const [search, setSearch] = useState("");
-  const [pendingOnly, setPendingOnly] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [pin, setPin] = useState(sessionStorage.getItem('pin') || '')
+  const [authed, setAuthed] = useState(false)
+  const [donors, setDonors] = useState([])
+  const [work, setWork] = useState('')
+  const [workDraft, setWorkDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [tab, setTab] = useState('all')
+  const [q, setQ] = useState('')
+  const [sheet, setSheet] = useState(null)
+  const pinRef = useRef(pin)
 
-  async function api(action, extra = {}) {
-    if (!API_URL) {
-      throw new Error("VITE_API_URL அமைக்கப்படவில்லை. Vercel Settings சரிபார்க்கவும்.");
-    }
+  const say = (text, bad) => { setToast({ text, bad }); setTimeout(() => setToast(null), bad ? 4500 : 2200) }
 
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ pin, action, ...extra })
-    });
-
-    if (!response.ok) {
-      throw new Error("Backend பதில் பிழை: " + response.status);
-    }
-
-    const data = await response.json();
-
-    if (data.error) throw new Error(data.error);
-
-    setDonors(data.donors || []);
-    setWork(data.work || "");
-    return data;
-  }
-
-  async function run(action, extra = {}) {
-    setBusy(true);
-    setError("");
-    setNotice("");
-
+  async function run(action, extra, okText) {
+    setBusy(true)
     try {
-      await api(action, extra);
-      setLoggedIn(true);
-      setNotice("Google Sheet வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது.");
-      return true;
+      const d = await api(pinRef.current, action, extra)
+      setDonors(d.donors || []); setWork(d.work || ''); setWorkDraft(d.work || '')
+      setAuthed(true); sessionStorage.setItem('pin', pinRef.current)
+      if (okText) say(okText)
+      return true
     } catch (e) {
-      setError(
-        e.message || "இணைப்பில் பிழை ஏற்பட்டது. மீண்டும் முயற்சிக்கவும்."
-      );
-      return false;
-    } finally {
-      setBusy(false);
-    }
+      if (e.badPin) { setAuthed(false); sessionStorage.removeItem('pin') }
+      say(e.message === 'Failed to fetch' ? 'இணைய இணைப்பை சரிபார்க்கவும்' : e.message, true)
+      return false
+    } finally { setBusy(false) }
   }
+  useEffect(() => { if (pin) run('load') }, [])
 
-  const total = donors.reduce((s, d) => s + d.total, 0);
-  const paid = donors.reduce((s, d) => s + d.paid, 0);
-  const balance = donors.reduce((s, d) => s + d.bal, 0);
+  const stats = useMemo(() => {
+    const total = donors.reduce((a, d) => a + d.total, 0), paid = donors.reduce((a, d) => a + d.paid, 0)
+    return { total, paid, bal: Math.max(0, total - paid), pct: total ? Math.min(100, Math.round(paid * 100 / total)) : 0,
+      done: donors.filter(d => d.bal <= 0).length }
+  }, [donors])
 
-  const visibleDonors = donors.filter(d => {
-    const matches =
-      d.name.toLowerCase().includes(search.toLowerCase()) ||
-      d.phone.includes(search);
-    return matches && (!pendingOnly || d.bal > 0);
-  });
+  const shown = useMemo(() => donors.filter(d =>
+    (d.name + d.phone).toLowerCase().includes(q.trim().toLowerCase()) &&
+    (tab === 'all' || (tab === 'pending' ? d.bal > 0 : d.bal <= 0))), [donors, q, tab])
 
-  if (!loggedIn) {
-    return (
-      <main className="app">
-        <header>
-          <h1>கோவில் திருப்பணி வசூல்</h1>
-          <p>நன்கொடை மற்றும் கட்டண நிலவரம்</p>
-        </header>
+  if (!authed) return (
+    <div className="login">
+      <div className="logo">🛕</div>
+      <h1>கோவில் திருவிழா வசூல்</h1>
+      <p>நிர்வாகி PIN-ஐ உள்ளிடவும்</p>
+      <form onSubmit={e => { e.preventDefault(); pinRef.current = pin; run('load') }}>
+        <input type="password" inputMode="numeric" autoComplete="current-password" value={pin}
+          onChange={e => setPin(e.target.value)} placeholder="PIN" aria-label="PIN" />
+        <button className="btn" disabled={busy || !pin}>{busy ? 'சரிபார்க்கிறது…' : 'உள்ளே செல்'}</button>
+      </form>
+      {toast && <div className={'toast' + (toast.bad ? ' bad' : '')} role="alert">{toast.text}</div>}
+    </div>
+  )
 
-        <section className="panel">
-          <h2>நிர்வாகி உள்நுழைவு</h2>
-          <form onSubmit={e => {
-            e.preventDefault();
-            run("load");
-          }}>
-            <label htmlFor="pin">PIN உள்ளிடவும்</label>
-            <input
-              id="pin"
-              type="password"
-              value={pin}
-              onChange={e => setPin(e.target.value)}
-              required
-            />
-            <button disabled={busy}>
-              {busy ? "சரிபார்க்கிறது..." : "உள்ளே செல்லவும்"}
-            </button>
-          </form>
-          {error && <p role="alert">{error}</p>}
-        </section>
-      </main>
-    );
-  }
+  const C = 2 * Math.PI * 44
 
   return (
-    <main className="app">
+    <div className="app">
       <header>
-        <h1>கோவில் திருப்பணி வசூல்</h1>
-        <p>நன்கொடை கணக்கு மேலாண்மை</p>
+        <div className="kolam" />
+        <div className="hero">
+          <svg viewBox="0 0 100 100" className="ring" role="img" aria-label={`${stats.pct}% வசூல்`}>
+            <circle cx="50" cy="50" r="44" className="track" />
+            <circle cx="50" cy="50" r="44" className="fill" strokeDasharray={C} strokeDashoffset={C * (1 - stats.pct / 100)} />
+            <text x="50" y="57" textAnchor="middle">{stats.pct}%</text>
+          </svg>
+          <div className="nums">
+            <h1>கோவில் திருவிழா வசூல்</h1>
+            <div><b>{rs(stats.paid)}</b> வசூல்</div>
+            <div><b>{rs(stats.bal)}</b> மீதம்</div>
+            <small>இலக்கு {rs(stats.total)} · {stats.done}/{donors.length} பேர் முடித்தனர்</small>
+          </div>
+        </div>
       </header>
 
-      <section className="panel">
-        <h2>மொத்த கணக்கு</h2>
-        <p>மொத்த இலக்கு: ₹{total.toLocaleString("en-IN")}</p>
-        <p>மொத்தம் வழங்கியது: ₹{paid.toLocaleString("en-IN")}</p>
-        <p>மீதம்: ₹{balance.toLocaleString("en-IN")}</p>
-        <button disabled={busy} onClick={() => run("load")}>
-          கணக்கைப் புதுப்பிக்கவும்
-        </button>
-      </section>
+      <main>
+        <section className="card work">
+          <label htmlFor="work">🔨 திருப்பணி நிலவரம்</label>
+          <textarea id="work" rows="2" value={workDraft} onChange={e => setWorkDraft(e.target.value)} placeholder="எ.கா: கோபுர வர்ணம் 60% முடிந்தது" />
+          {workDraft !== work && <button className="btn" disabled={busy} onClick={() => run('work', { text: workDraft }, 'நிலவரம் சேமிக்கப்பட்டது')}>சேமி</button>}
+        </section>
 
-      <section className="panel">
-        <h2>திருப்பணி நிலவரம்</h2>
-        <textarea
-          value={work}
-          onChange={e => setWork(e.target.value)}
-          placeholder="திருப்பணி நிலவரத்தை உள்ளிடவும்"
-        />
-        <button disabled={busy} onClick={() => run("work", { text: work })}>
-          நிலவரத்தைச் சேமிக்கவும்
-        </button>
-      </section>
+        <div className="find">
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 பெயர் அல்லது எண் தேடு" aria-label="தேடு" />
+          <div className="tabs" role="tablist">
+            {[['all', 'அனைவரும்'], ['pending', 'மீதம் உள்ளவர்'], ['done', 'முடித்தவர்']].map(([k, t]) =>
+              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}
+          </div>
+        </div>
 
-      <section className="panel">
-        <h2>நன்கொடையாளர்கள் ({visibleDonors.length})</h2>
+        <ul className="list">
+          {shown.map(d => {
+            const pct = d.total ? Math.min(100, Math.round(d.paid * 100 / d.total)) : 0
+            return (
+              <li key={d.row} className={d.bal <= 0 ? 'done' : ''}>
+                <div className="avatar" aria-hidden="true">{first(d.name)}</div>
+                <div className="info">
+                  <b>{d.name}</b>
+                  <span className="ph">{d.phone}</span>
+                  <div className="mini"><i style={{ width: pct + '%' }} /></div>
+                  <span className="line">{rs(d.paid)} / {rs(d.total)} · <strong>{d.bal > 0 ? 'மீதம் ' + rs(d.bal) : '✔ முழுவதும் செலுத்தினார்'}</strong></span>
+                </div>
+                <div className="acts">
+                  <button className="btn" onClick={() => setSheet({ type: 'pay', d })}>+ பணம்</button>
+                  <button className="btn ghost" onClick={() => setSheet({ type: 'msg', d })}>📄 செய்தி</button>
+                </div>
+              </li>)
+          })}
+          {!shown.length && <p className="empty">யாரும் இல்லை</p>}
+        </ul>
+      </main>
 
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="பெயர் அல்லது தொலைபேசி எண் தேடவும்"
-        />
+      <nav className="dock">
+        <button className="btn" onClick={() => setSheet({ type: 'add' })}>+ புதிய நன்கொடையாளர்</button>
+        <button className="btn ghost" onClick={() => setSheet({ type: 'round' })}>புதிய சுற்று</button>
+        <button className="link" onClick={() => { sessionStorage.removeItem('pin'); setAuthed(false); setPin('') }}>வெளியேறு</button>
+      </nav>
 
-        <label>
-          <input
-            type="checkbox"
-            checked={pendingOnly}
-            onChange={e => setPendingOnly(e.target.checked)}
-          />
-          மீதம் உள்ளவர்கள் மட்டும்
-        </label>
+      {sheet && sheet.type === 'msg' && <MsgSheet d={sheet.d} close={() => setSheet(null)} say={say} />}
+      {sheet && sheet.type !== 'msg' && <Sheet sheet={sheet} busy={busy} close={() => setSheet(null)}
+        go={async (a, x, t) => { if (await run(a, x, t)) setSheet(null) }} />}
+      {toast && <div className={'toast' + (toast.bad ? ' bad' : '')} role="alert">{toast.text}</div>}
+    </div>
+  )
+}
 
-        {visibleDonors.map(d => (
-          <article className="donor" key={d.row}>
-            <h3>{d.name}</h3>
-            <p>மொத்த இலக்கு: ₹{d.total}</p>
-            <p>மொத்தம் வழங்கியது: ₹{d.paid}</p>
-            <p>மீதம்: ₹{d.bal}</p>
+function Sheet({ sheet, busy, close, go }) {
+  const d = sheet.d
+  const [rid] = useState(uid)           // same id on retry = no double payment
+  const [amt, setAmt] = useState('')
+  const [minus, setMinus] = useState(false)
+  const [f, setF] = useState({ name: '', phone: '', total: '' })
+  const n = Number(amt) || 0
+  const after = d ? d.bal - (minus ? -n : n) : 0
 
-            <input
-              type="number"
-              min="1"
-              step="1"
-              placeholder="சேர்க்க வேண்டிய தொகை"
-              value={amounts[d.row] || ""}
-              onChange={e => setAmounts(old => ({
-                ...old, [d.row]: e.target.value
-              }))}
-            />
-
-            <button disabled={busy} onClick={async () => {
-              const amount = Number(amounts[d.row]);
-
-              if (!Number.isSafeInteger(amount) || amount <= 0) {
-                setError("சரியான முழு ரூபாய் தொகையை உள்ளிடவும்.");
-                return;
-              }
-
-              if (amount > d.bal) {
-                setError("மீதமுள்ள தொகையைவிட அதிகமாகப் பதிவு செய்ய முடியாது.");
-                return;
-              }
-
-              if (!window.confirm(
-                `${d.name} அவர்களுக்கு ₹${amount} பதிவு செய்யவா?`
-              )) return;
-
-              const ok = await run("pay", { row: d.row, amount });
-              if (ok) {
-                setAmounts(old => ({ ...old, [d.row]: "" }));
-              }
-            }}>
-              பணம் சேர்
-            </button>
-
-            {d.phone && (
-              <p>
-                <a
-                  href={`https://wa.me/91${d.phone.replace(/\D/g, "").slice(-10)}?text=${encodeURIComponent(
-                    `வணக்கம் ${d.name}, மொத்தம் வழங்கியது ₹${d.paid}, மீதம் ₹${d.bal}. திருப்பணி நிலவரம்: ${work}`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  WhatsApp செய்தி
-                </a>
-              </p>
-            )}
-          </article>
-        ))}
-      </section>
-
-      <section className="panel">
-        <h2>புதிய வசூல் சுற்று</h2>
-        <p>முந்தைய மொத்தத்தை D column-க்கு மாற்றி, E column-ஐ பூஜ்ஜியமாக்கும்.</p>
-        <button disabled={busy} onClick={() => {
-          if (window.confirm(
-            "புதிய சுற்றைத் தொடங்கவா? முதலில் Sheet backup எடுத்துக்கொள்ளுங்கள்."
-          )) {
-            run("newRound");
-          }
-        }}>
-          புதிய சுற்று தொடங்கு
-        </button>
-      </section>
-
-      {notice && <p role="status">{notice}</p>}
-      {error && <p role="alert">{error}</p>}
-
-      <button onClick={() => {
-        setLoggedIn(false);
-        setPin("");
-        setDonors([]);
-        setError("");
-        setNotice("");
+  return (
+    <div className="back" onClick={close}>
+      <form className="sheet" onClick={e => e.stopPropagation()} onSubmit={e => {
+        e.preventDefault()
+        if (sheet.type === 'pay') go('pay', { row: d.row, amount: minus ? -n : n, requestId: rid }, 'பணம் சேர்க்கப்பட்டது ✔')
+        else if (sheet.type === 'add') go('addDonor', { name: f.name.trim(), phone: f.phone.replace(/\D/g, '').slice(-10), total: Number(f.total) }, 'நன்கொடையாளர் சேர்க்கப்பட்டார் ✔')
+        else go('newRound', {}, 'புதிய சுற்று தொடங்கியது ✔')
       }}>
-        வெளியேறு
-      </button>
-    </main>
-  );
+        {sheet.type === 'pay' && <>
+          <h2>{d.name}</h2>
+          <p>தற்போது மீதம்: <b>{rs(d.bal)}</b></p>
+          <input autoFocus type="number" inputMode="numeric" min="1" value={amt} onChange={e => setAmt(e.target.value)} placeholder="தொகை ₹" aria-label="தொகை" />
+          <div className="chips">
+            {[500, 1000, 2000, 5000].map(v => <button type="button" key={v} onClick={() => setAmt(String(v))}>{rs(v)}</button>)}
+            {d.bal > 0 && <button type="button" onClick={() => setAmt(String(d.bal))}>மீதம் முழுவதும்</button>}
+          </div>
+          <label className="check"><input type="checkbox" checked={minus} onChange={e => setMinus(e.target.checked)} /> தவறாக சேர்த்ததை கழிக்க</label>
+          {n > 0 && <p className="preview">{minus ? 'கழித்த' : 'சேர்த்த'} பிறகு மீதம்: <b>{rs(Math.max(0, after))}</b></p>}
+        </>}
+        {sheet.type === 'add' && <>
+          <h2>புதிய நன்கொடையாளர்</h2>
+          <input autoFocus required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="பெயர்" />
+          <input required type="tel" inputMode="numeric" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} placeholder="10 இலக்க கைபேசி எண்" />
+          <input required type="number" inputMode="numeric" min="1" value={f.total} onChange={e => setF({ ...f, total: e.target.value })} placeholder="வழங்குவதாக சொன்ன தொகை ₹" />
+        </>}
+        {sheet.type === 'round' && <>
+          <h2>புதிய சுற்று தொடங்கவா?</h2>
+          <p>இதுவரை வழங்கிய மொத்தம் “முன்பு வழங்கிய” பகுதிக்கு மாறும். “தற்பொழுது வழங்கிய” 0 ஆகும். இதை உடனே திரும்பப் பெற முடியாது.</p>
+        </>}
+        <div className="row">
+          <button type="button" className="btn ghost" onClick={close}>ரத்து</button>
+          <button className="btn" disabled={busy || (sheet.type === 'pay' && !n)}>{busy ? 'சேமிக்கிறது…' : sheet.type === 'round' ? 'ஆம், தொடங்கு' : 'சேமி'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function MsgSheet({ d, close, say }) {
+  const text = d.msg || localMsg(d)
+  const sep = /iPhone|iPad/.test(navigator.userAgent) ? '&' : '?'
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); say('நகலெடுக்கப்பட்டது ✔') }
+    catch { say('நகலெடுக்க முடியவில்லை', true) }
+  }
+  return (
+    <div className="back" onClick={close}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <h2>{d.name} — செய்தி</h2>
+        <div className="printarea"><p className="msgtext">{text}</p></div>
+        <div className="row">
+          <a className="btn" href={`https://wa.me/91${d.phone}?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer">WhatsApp</a>
+          <a className="btn ghost" href={`sms:+91${d.phone}${sep}body=${encodeURIComponent(text)}`}>SMS</a>
+        </div>
+        <div className="row">
+          <button className="btn ghost" onClick={copy}>நகல்</button>
+          <button className="btn ghost" onClick={() => window.print()}>🖨 அச்சிடு</button>
+        </div>
+        <button className="link" onClick={close}>மூடு</button>
+      </div>
+    </div>
+  )
 }
