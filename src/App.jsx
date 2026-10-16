@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-   import './style.css'
+import './app.css'
 
 const rs = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const first = s => { try { return [...new Intl.Segmenter('ta', { granularity: 'grapheme' }).segment(s)][0].segment } catch { return (s || '?')[0] } }
@@ -34,13 +34,15 @@ export default function App() {
   const [q, setQ] = useState('')
   const [sheet, setSheet] = useState(null)
   const pinRef = useRef(pin)
+  const [book, setBook] = useState(sessionStorage.getItem('book') || 'mangalya')
+  const bookRef = useRef(book)
 
   const say = (text, bad) => { setToast({ text, bad }); setTimeout(() => setToast(null), bad ? 4500 : 2200) }
 
   async function run(action, extra, okText) {
     setBusy(true)
     try {
-      const d = await api(pinRef.current, action, extra)
+      const d = await api(pinRef.current, action, { sheet: bookRef.current, ...extra })
       setDonors(d.donors || []); setWork(d.work || ''); setWorkDraft(d.work || '')
       setAuthed(true); sessionStorage.setItem('pin', pinRef.current)
       if (okText) say(okText)
@@ -52,6 +54,11 @@ export default function App() {
     } finally { setBusy(false) }
   }
   useEffect(() => { if (pin) run('load') }, [])
+  const pick = k => {
+    if (k === bookRef.current) return
+    bookRef.current = k; setBook(k); sessionStorage.setItem('book', k)
+    setDonors([]); setQ(''); setTab('all'); run('load')
+  }
 
   const stats = useMemo(() => {
     const total = donors.reduce((a, d) => a + d.total, 0), paid = donors.reduce((a, d) => a + d.paid, 0)
@@ -99,6 +106,10 @@ export default function App() {
       </header>
 
       <main>
+        <div className="books" role="tablist">
+          {[['mangalya', 'மாங்கல்ய காணிக்கை'], ['donation', 'நன்கொடை']].map(([k, t]) =>
+            <button key={k} role="tab" aria-selected={book === k} className={book === k ? 'on' : ''} onClick={() => pick(k)}>{t}</button>)}
+        </div>
         <section className="card work">
           <label htmlFor="work">🔨 திருப்பணி நிலவரம்</label>
           <textarea id="work" rows="2" value={workDraft} onChange={e => setWorkDraft(e.target.value)} placeholder="எ.கா: கோபுர வர்ணம் 60% முடிந்தது" />
@@ -128,16 +139,16 @@ export default function App() {
                 <div className="acts">
                   <button className="btn" onClick={() => setSheet({ type: 'pay', d })}>+ பணம்</button>
                   <button className="btn ghost" onClick={() => setSheet({ type: 'msg', d })}>📄 செய்தி</button>
+                  <button className="btn ghost" onClick={() => setSheet({ type: 'edit', d })}>✏️ திருத்து</button>
                 </div>
               </li>)
           })}
-          {!shown.length && <p className="empty">யாரும் இல்லை</p>}
+          {!shown.length && <p className="empty">{busy ? 'ஏற்றுகிறது…' : 'யாரும் இல்லை'}</p>}
         </ul>
       </main>
 
       <nav className="dock">
         <button className="btn" onClick={() => setSheet({ type: 'add' })}>+ புதிய நன்கொடையாளர்</button>
-        <button className="btn ghost" onClick={() => setSheet({ type: 'round' })}>புதிய சுற்று</button>
         <button className="link" onClick={() => { sessionStorage.removeItem('pin'); setAuthed(false); setPin('') }}>வெளியேறு</button>
       </nav>
 
@@ -155,6 +166,8 @@ function Sheet({ sheet, busy, close, go }) {
   const [amt, setAmt] = useState('')
   const [minus, setMinus] = useState(false)
   const [f, setF] = useState({ name: '', phone: '', total: '' })
+  const [ed, setEd] = useState(() => d ? { name: d.name, phone: d.phone, total: String(d.total), prev: String(d.prev ?? 0), now: String(d.now ?? 0) } : {})
+  const num = v => Number(v) || 0
   const n = Number(amt) || 0
   const after = d ? d.bal - (minus ? -n : n) : 0
 
@@ -164,7 +177,7 @@ function Sheet({ sheet, busy, close, go }) {
         e.preventDefault()
         if (sheet.type === 'pay') go('pay', { row: d.row, amount: minus ? -n : n, requestId: rid }, 'பணம் சேர்க்கப்பட்டது ✔')
         else if (sheet.type === 'add') go('addDonor', { name: f.name.trim(), phone: f.phone.replace(/\D/g, '').slice(-10), total: Number(f.total) }, 'நன்கொடையாளர் சேர்க்கப்பட்டார் ✔')
-        else go('newRound', {}, 'புதிய சுற்று தொடங்கியது ✔')
+        else go('editDonor', { row: d.row, name: ed.name.trim(), phone: ed.phone.replace(/\D/g, '').slice(-10), total: num(ed.total), prev: num(ed.prev), now: num(ed.now) }, 'மாற்றம் சேமிக்கப்பட்டது ✔')
       }}>
         {sheet.type === 'pay' && <>
           <h2>{d.name}</h2>
@@ -183,13 +196,18 @@ function Sheet({ sheet, busy, close, go }) {
           <input required type="tel" inputMode="numeric" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} placeholder="10 இலக்க கைபேசி எண்" />
           <input required type="number" inputMode="numeric" min="1" value={f.total} onChange={e => setF({ ...f, total: e.target.value })} placeholder="வழங்குவதாக சொன்ன தொகை ₹" />
         </>}
-        {sheet.type === 'round' && <>
-          <h2>புதிய சுற்று தொடங்கவா?</h2>
-          <p>இதுவரை வழங்கிய மொத்தம் “முன்பு வழங்கிய” பகுதிக்கு மாறும். “தற்பொழுது வழங்கிய” 0 ஆகும். இதை உடனே திரும்பப் பெற முடியாது.</p>
+        {sheet.type === 'edit' && <>
+          <h2>திருத்து</h2>
+          <label className="fld">பெயர்<input required value={ed.name} onChange={x => setEd({ ...ed, name: x.target.value })} /></label>
+          <label className="fld">கைபேசி எண்<input required type="tel" inputMode="numeric" value={ed.phone} onChange={x => setEd({ ...ed, phone: x.target.value })} /></label>
+          <label className="fld">மொத்த தொகை ₹<input required type="number" inputMode="numeric" min="1" value={ed.total} onChange={x => setEd({ ...ed, total: x.target.value })} /></label>
+          <label className="fld">முன்பு வழங்கிய ₹<input required type="number" inputMode="numeric" min="0" value={ed.prev} onChange={x => setEd({ ...ed, prev: x.target.value })} /></label>
+          <label className="fld">தற்பொழுது வழங்கிய ₹<input required type="number" inputMode="numeric" min="0" value={ed.now} onChange={x => setEd({ ...ed, now: x.target.value })} /></label>
+          <p className="preview">மொத்தம் வழங்கியது: <b>{rs(num(ed.prev) + num(ed.now))}</b> · மீதம்: <b>{rs(Math.max(0, num(ed.total) - num(ed.prev) - num(ed.now)))}</b></p>
         </>}
         <div className="row">
           <button type="button" className="btn ghost" onClick={close}>ரத்து</button>
-          <button className="btn" disabled={busy || (sheet.type === 'pay' && !n)}>{busy ? 'சேமிக்கிறது…' : sheet.type === 'round' ? 'ஆம், தொடங்கு' : 'சேமி'}</button>
+          <button className="btn" disabled={busy || (sheet.type === 'pay' && !n)}>{busy ? 'சேமிக்கிறது…' : 'சேமி'}</button>
         </div>
       </form>
     </div>
