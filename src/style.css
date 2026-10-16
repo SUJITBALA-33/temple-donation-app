@@ -47,3 +47,9 @@ li.done .avatar{background:#dff1e8;color:var(--green)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .msgtext{white-space:pre-wrap;background:#fff6e0;padding:12px;border-radius:10px;margin:0;color:var(--ink)!important;max-height:40vh;overflow:auto;line-height:1.8}
 @media print{body *{visibility:hidden}.printarea,.printarea *{visibility:visible}.printarea{position:absolute;left:0;top:0;width:100%;padding:24px;font-size:18px}.msgtext{background:none!important;max-height:none;overflow:visible}}
+.books{display:flex;gap:8px;margin-top:14px}
+.books button{flex:1;min-height:48px;border:2px solid var(--m);background:#fff;color:var(--m);border-radius:12px;font-weight:600;cursor:pointer}
+.books button.on{background:var(--m);color:#fff}.books button:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.fld{display:grid;gap:4px;font-weight:600}
+.acts .btn{padding:8px 6px;font-size:.95rem}
+.sheet{max-height:92vh;overflow:auto}
