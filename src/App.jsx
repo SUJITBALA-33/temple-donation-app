@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import './app.css'
+import './style.css'
 
 const rs = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const first = s => { try { return [...new Intl.Segmenter('ta', { granularity: 'grapheme' }).segment(s)][0].segment } catch { return (s || '?')[0] } }
