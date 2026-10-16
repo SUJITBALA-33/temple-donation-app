@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import './style.css'
+   import './style.css'
 
 const rs = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const first = s => { try { return [...new Intl.Segmenter('ta', { granularity: 'grapheme' }).segment(s)][0].segment } catch { return (s || '?')[0] } }
@@ -36,6 +36,7 @@ export default function App() {
   const pinRef = useRef(pin)
   const [book, setBook] = useState(sessionStorage.getItem('book') || 'mangalya')
   const bookRef = useRef(book)
+  const [pledge, setPledge] = useState(true)   // false for tabs that have no pledge/balance column
 
   const say = (text, bad) => { setToast({ text, bad }); setTimeout(() => setToast(null), bad ? 4500 : 2200) }
 
@@ -43,6 +44,8 @@ export default function App() {
     setBusy(true)
     try {
       const d = await api(pinRef.current, action, { sheet: bookRef.current, ...extra })
+      if (d.sheet !== bookRef.current) throw new Error('Apps Script பழைய version — Deploy → Manage deployments → New version செய்யவும்')
+      setPledge(d.hasPledge !== false)
       setDonors(d.donors || []); setWork(d.work || ''); setWorkDraft(d.work || '')
       setAuthed(true); sessionStorage.setItem('pin', pinRef.current)
       if (okText) say(okText)
@@ -91,16 +94,18 @@ export default function App() {
       <header>
         <div className="kolam" />
         <div className="hero">
+          {pledge && (
           <svg viewBox="0 0 100 100" className="ring" role="img" aria-label={`${stats.pct}% வசூல்`}>
             <circle cx="50" cy="50" r="44" className="track" />
             <circle cx="50" cy="50" r="44" className="fill" strokeDasharray={C} strokeDashoffset={C * (1 - stats.pct / 100)} />
             <text x="50" y="57" textAnchor="middle">{stats.pct}%</text>
           </svg>
+          )}
           <div className="nums">
             <h1>கோவில் திருவிழா வசூல்</h1>
-            <div><b>{rs(stats.paid)}</b> வசூல்</div>
-            <div><b>{rs(stats.bal)}</b> மீதம்</div>
-            <small>இலக்கு {rs(stats.total)} · {stats.done}/{donors.length} பேர் முடித்தனர்</small>
+            <div><b>{rs(stats.paid)}</b> {pledge ? 'வசூல்' : 'மொத்த நன்கொடை'}</div>
+            {pledge ? <><div><b>{rs(stats.bal)}</b> மீதம்</div>
+            <small>இலக்கு {rs(stats.total)} · {stats.done}/{donors.length} பேர் முடித்தனர்</small></> : <small>{donors.length} நன்கொடையாளர்கள்</small>}
           </div>
         </div>
       </header>
@@ -118,23 +123,23 @@ export default function App() {
 
         <div className="find">
           <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 பெயர் அல்லது எண் தேடு" aria-label="தேடு" />
-          <div className="tabs" role="tablist">
+          {pledge && <div className="tabs" role="tablist">
             {[['all', 'அனைவரும்'], ['pending', 'மீதம் உள்ளவர்'], ['done', 'முடித்தவர்']].map(([k, t]) =>
               <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{t}</button>)}
-          </div>
+          </div>}
         </div>
 
         <ul className="list">
           {shown.map(d => {
             const pct = d.total ? Math.min(100, Math.round(d.paid * 100 / d.total)) : 0
             return (
-              <li key={d.row} className={d.bal <= 0 ? 'done' : ''}>
+              <li key={d.row} className={pledge && d.bal <= 0 ? 'done' : ''}>
                 <div className="avatar" aria-hidden="true">{first(d.name)}</div>
                 <div className="info">
                   <b>{d.name}</b>
                   <span className="ph">{d.phone}</span>
-                  <div className="mini"><i style={{ width: pct + '%' }} /></div>
-                  <span className="line">{rs(d.paid)} / {rs(d.total)} · <strong>{d.bal > 0 ? 'மீதம் ' + rs(d.bal) : '✔ முழுவதும் செலுத்தினார்'}</strong></span>
+                  {pledge && <div className="mini"><i style={{ width: pct + '%' }} /></div>}
+                  <span className="line">{pledge ? <>{rs(d.paid)} / {rs(d.total)} · <strong>{d.bal > 0 ? 'மீதம் ' + rs(d.bal) : '✔ முழுவதும் செலுத்தினார்'}</strong></> : <strong>வழங்கியது {rs(d.paid)}</strong>}</span>
                 </div>
                 <div className="acts">
                   <button className="btn" onClick={() => setSheet({ type: 'pay', d })}>+ பணம்</button>
@@ -153,14 +158,14 @@ export default function App() {
       </nav>
 
       {sheet && sheet.type === 'msg' && <MsgSheet d={sheet.d} close={() => setSheet(null)} say={say} />}
-      {sheet && sheet.type !== 'msg' && <Sheet sheet={sheet} busy={busy} close={() => setSheet(null)}
+      {sheet && sheet.type !== 'msg' && <Sheet pledge={pledge} sheet={sheet} busy={busy} close={() => setSheet(null)}
         go={async (a, x, t) => { if (await run(a, x, t)) setSheet(null) }} />}
       {toast && <div className={'toast' + (toast.bad ? ' bad' : '')} role="alert">{toast.text}</div>}
     </div>
   )
 }
 
-function Sheet({ sheet, busy, close, go }) {
+function Sheet({ sheet, busy, close, go, pledge }) {
   const d = sheet.d
   const [rid] = useState(uid)           // same id on retry = no double payment
   const [amt, setAmt] = useState('')
@@ -176,34 +181,34 @@ function Sheet({ sheet, busy, close, go }) {
       <form className="sheet" onClick={e => e.stopPropagation()} onSubmit={e => {
         e.preventDefault()
         if (sheet.type === 'pay') go('pay', { row: d.row, amount: minus ? -n : n, requestId: rid }, 'பணம் சேர்க்கப்பட்டது ✔')
-        else if (sheet.type === 'add') go('addDonor', { name: f.name.trim(), phone: f.phone.replace(/\D/g, '').slice(-10), total: Number(f.total) }, 'நன்கொடையாளர் சேர்க்கப்பட்டார் ✔')
+        else if (sheet.type === 'add') go('addDonor', { name: f.name.trim(), phone: f.phone.replace(/\D/g, '').slice(-10), total: pledge ? Number(f.total) : 0 }, 'நன்கொடையாளர் சேர்க்கப்பட்டார் ✔')
         else go('editDonor', { row: d.row, name: ed.name.trim(), phone: ed.phone.replace(/\D/g, '').slice(-10), total: num(ed.total), prev: num(ed.prev), now: num(ed.now) }, 'மாற்றம் சேமிக்கப்பட்டது ✔')
       }}>
         {sheet.type === 'pay' && <>
           <h2>{d.name}</h2>
-          <p>தற்போது மீதம்: <b>{rs(d.bal)}</b></p>
+          <p>{pledge ? <>தற்போது மீதம்: <b>{rs(d.bal)}</b></> : <>இதுவரை வழங்கியது: <b>{rs(d.paid)}</b></>}</p>
           <input autoFocus type="number" inputMode="numeric" min="1" value={amt} onChange={e => setAmt(e.target.value)} placeholder="தொகை ₹" aria-label="தொகை" />
           <div className="chips">
             {[500, 1000, 2000, 5000].map(v => <button type="button" key={v} onClick={() => setAmt(String(v))}>{rs(v)}</button>)}
-            {d.bal > 0 && <button type="button" onClick={() => setAmt(String(d.bal))}>மீதம் முழுவதும்</button>}
+            {pledge && d.bal > 0 && <button type="button" onClick={() => setAmt(String(d.bal))}>மீதம் முழுவதும்</button>}
           </div>
           <label className="check"><input type="checkbox" checked={minus} onChange={e => setMinus(e.target.checked)} /> தவறாக சேர்த்ததை கழிக்க</label>
-          {n > 0 && <p className="preview">{minus ? 'கழித்த' : 'சேர்த்த'} பிறகு மீதம்: <b>{rs(Math.max(0, after))}</b></p>}
+          {n > 0 && <p className="preview">{pledge ? <>{minus ? 'கழித்த' : 'சேர்த்த'} பிறகு மீதம்: <b>{rs(Math.max(0, after))}</b></> : <>பிறகு மொத்தம் வழங்கியது: <b>{rs(Math.max(0, d.paid + (minus ? -n : n)))}</b></>}</p>}
         </>}
         {sheet.type === 'add' && <>
           <h2>புதிய நன்கொடையாளர்</h2>
           <input autoFocus required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="பெயர்" />
           <input required type="tel" inputMode="numeric" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} placeholder="10 இலக்க கைபேசி எண்" />
-          <input required type="number" inputMode="numeric" min="1" value={f.total} onChange={e => setF({ ...f, total: e.target.value })} placeholder="வழங்குவதாக சொன்ன தொகை ₹" />
+          {pledge && <input required type="number" inputMode="numeric" min="1" value={f.total} onChange={e => setF({ ...f, total: e.target.value })} placeholder="வழங்குவதாக சொன்ன தொகை ₹" />}
         </>}
         {sheet.type === 'edit' && <>
           <h2>திருத்து</h2>
           <label className="fld">பெயர்<input required value={ed.name} onChange={x => setEd({ ...ed, name: x.target.value })} /></label>
           <label className="fld">கைபேசி எண்<input required type="tel" inputMode="numeric" value={ed.phone} onChange={x => setEd({ ...ed, phone: x.target.value })} /></label>
-          <label className="fld">மொத்த தொகை ₹<input required type="number" inputMode="numeric" min="1" value={ed.total} onChange={x => setEd({ ...ed, total: x.target.value })} /></label>
+          {pledge && <label className="fld">மொத்த தொகை ₹<input required type="number" inputMode="numeric" min="1" value={ed.total} onChange={x => setEd({ ...ed, total: x.target.value })} /></label>}
           <label className="fld">முன்பு வழங்கிய ₹<input required type="number" inputMode="numeric" min="0" value={ed.prev} onChange={x => setEd({ ...ed, prev: x.target.value })} /></label>
           <label className="fld">தற்பொழுது வழங்கிய ₹<input required type="number" inputMode="numeric" min="0" value={ed.now} onChange={x => setEd({ ...ed, now: x.target.value })} /></label>
-          <p className="preview">மொத்தம் வழங்கியது: <b>{rs(num(ed.prev) + num(ed.now))}</b> · மீதம்: <b>{rs(Math.max(0, num(ed.total) - num(ed.prev) - num(ed.now)))}</b></p>
+          <p className="preview">மொத்தம் வழங்கியது: <b>{rs(num(ed.prev) + num(ed.now))}</b>{pledge && <> · மீதம்: <b>{rs(Math.max(0, num(ed.total) - num(ed.prev) - num(ed.now)))}</b></>}</p>
         </>}
         <div className="row">
           <button type="button" className="btn ghost" onClick={close}>ரத்து</button>
@@ -215,7 +220,7 @@ function Sheet({ sheet, busy, close, go }) {
 }
 
 function MsgSheet({ d, close, say }) {
-  const text = d.msg || localMsg(d)
+  const text = d.msg || (d.total > 0 ? localMsg(d) : 'செய்தி இல்லை')
   const sep = /iPhone|iPad/.test(navigator.userAgent) ? '&' : '?'
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); say('நகலெடுக்கப்பட்டது ✔') }
